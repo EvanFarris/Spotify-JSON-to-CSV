@@ -6,10 +6,10 @@ import os
 import pandas as pd
 
 if len(sys.argv) == 1 or sys.argv[1] == "-help":
-    print("\nFormat: python spotifyjsontocsv.py -dir <path to directory with spotify files> -minCount <number> -maxCount <number> -minRatio <0 <= float <= 1> -maxRatio <0 <= float <= 1 -ignoreFile <path>")
-    print("\nPossible criteria: completion/ended_early/total/first_played/last_played/listen_time\n")
+    print("\nFormat: python spotifyjsontocsv.py -dir <path to directory with spotify files> -minCount <number> -maxCount <number> -minRatio <0 <= float <= 1> -maxRatio <0 <= float <= 1 -ignoreFile <path> -minDate 2019-01-01 -maxDate 2020-12-31")
+    print("\nPossible criteria: completion/ended_early/total/listen_time\n")
     print("\nRatio criteria: Shows songs you've completed more than the minimum percent of times\n")
-    print("\nIf using first_played/last_played, date range is in the format 'YYYY-MM-DD'\n")
+    print("\nIf using -minDate or -maxDate, date range is in the format 'YYYY-MM-DD'\n")
     sys.exit()
     
 argCounter = 1
@@ -31,11 +31,16 @@ try:
                 maxRatio = float(sys.argv[argCounter + 1])
             case "-ignoreFile":
                 comparisonFile = sys.argv[argCounter + 1]
+            case "-minDate":
+                minDate = sys.argv[argCounter + 1]
+            case "-maxDate":
+                maxDate = sys.argv[argCounter + 1]
             case _:
-                print("Error in parsing command line arguments. Valid arguments: -dir -sort -minCount -maxCount -minRatio -maxRatio -ignoreFile")
+                print("Error in parsing command line arguments. Valid arguments: -dir -sort -minCount -maxCount -minRatio -maxRatio -ignoreFile -minDate -maxDate")
                 sys.exit()
         argCounter += 2
-except:
+except Exception as e:
+    print(e)
     print("Error with one of the count or ratio fields. -minCount/-maxCount/-minRatio/-maxRatio must be a number.")
     
 
@@ -52,7 +57,24 @@ except:
 if len(files) == 0:
     print("No files found in" + path)
     sys.exit()
+
 #Initialize variables, give default values if value not entered.
+try: criteriaArg
+except: criteriaArg = "total"
+match criteriaArg:
+    case "completion":
+        criteria = 0
+    case "ended_early":
+        criteria = 1
+    case "listen_time":
+        criteria = 4
+    case "total":
+        criteria = 5
+    case _:
+        criteria = 5
+
+overallMaxDate = "9999-12-31"
+overallMinDate = "1900-01-01"
 try: minCount
 except: minCount = 0
 try: maxCount
@@ -61,6 +83,10 @@ try: minRatio
 except: minRatio = float(0)
 try: maxRatio
 except: maxRatio = float(1.0)
+try: minDate
+except: minDate = overallMinDate
+try: maxDate
+except: maxDate = overallMaxDate
     
 if minCount > maxCount:
     print("minCount is bigger than maxCount")
@@ -68,24 +94,8 @@ if minCount > maxCount:
 if minRatio > maxRatio:
     print("minRatio is bigger than maxRatio")
     sys.exit()
-
-try: criteriaArg
-except: criteriaArg = "total"
-match criteriaArg:
-    case "completion":
-        criteria = 0
-    case "ended_early":
-        criteria = 1
-    case "first_played":
-        criteria = 2
-    case "last_played":
-        criteria = 3
-    case "listen_time":
-        criteria = 4
-    case "total":
-        criteria = 5
-    case _:
-        criteria = 5
+if minDate > maxDate:
+    print("minDate is bigger than maxDate")
 #Setup the output file name
 ts = str(int(time.time()))
 outputfn = "output_" + ts + ".csv"
@@ -95,10 +105,8 @@ null_song_count = 0
 total_played_count = 0
 skipped_song_count = 0
 total_seconds = 0
-maxDate = "9999-12-31"
-minDate = "1900-01-01"
-overall_first_played = maxDate
-overall_last_played = minDate
+overall_first_played = overallMaxDate
+overall_last_played = overallMinDate
 ###Dictionaries to hold data
 #{spotify_uri, [fullyPlayedCount, songEndedEarlyCount, firstPlayed, lastPlayed, timePlayed]}
 songTemporalDict = {}
@@ -140,7 +148,7 @@ for fileName in files:
                 if obj["spotify_track_uri"] in songTemporalDict:
                     songTemporal = songTemporalDict[obj["spotify_track_uri"]]
                 else:
-                    songTemporal = [0,0,maxDate,minDate, 0]
+                    songTemporal = [0,0,overallMaxDate,overallMinDate, 0]
                     songPermanentDict.update({obj["spotify_track_uri"] : [obj["master_metadata_track_name"], obj["master_metadata_album_artist_name"]] })
                 
                 songTemporal[4] += obj["ms_played"]
@@ -182,7 +190,7 @@ for songUri, temporalSongData in songTemporalDict:
     if not comparisonArr is None and songUri in comparisonArr:
         continue
     ratio = float(temporalSongData[0] / (temporalSongData[0] + temporalSongData[1]))
-    if ratio >= minRatio and ratio <= maxRatio and (criteria <= 4 and temporalSongData[criteria] <= maxCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] <= maxCount):
+    if (ratio >= minRatio and ratio <= maxRatio) and (criteria <= 4 and temporalSongData[criteria] <= maxCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] <= maxCount) and (temporalSongData[2] >= minDate and temporalSongData[2] <= maxDate):
         total_played_count += temporalSongData[0]
         skipped_song_count += temporalSongData[1]
         total_seconds += temporalSongData[4]
@@ -195,7 +203,7 @@ for songUri, temporalSongData in songTemporalDict:
 f = open(outputfn, "a", encoding="utf-8", newline="")
 csvWriter = csv.writer(f)
 csvWriter.writerow(["Song name", "Artist", "Number of Times Completed", "Number of times ended early", "Total number of plays", "Total Minutes listened", "first_played", "last_played", "Spotify uri"])
-csvWriter.writerow(["All", "Various", total_played_count, skipped_song_count, total_played_count + skipped_song_count, int(total_seconds / 60000), overall_first_played, overall_last_played, "Sorted by " + criteriaArg + " | " + str(minCount) +" <= count <=" + str(maxCount) + " | " + str(minRatio) + " <= ratio <= "+ str(maxRatio) + " | Null song entries: " + str(null_song_count)])
+csvWriter.writerow(["All", "Various", total_played_count, skipped_song_count, total_played_count + skipped_song_count, int(total_seconds / 60000), overall_first_played, overall_last_played, "Sorted by " + criteriaArg + " | " + str(minCount) +" <= count <=" + str(maxCount) + " | " + str(minRatio) + " <= ratio <= "+ str(maxRatio) + " | " + minDate + " <= first_played <= " + maxDate + " | Null song entries: " + str(null_song_count)])
 #Array to hold all the spotify uris to output
 uriArray = []
 
@@ -206,7 +214,7 @@ for songUri, temporalSongData in songTemporalDict:
     if not comparisonArr is None and songUri in comparisonArr:
         continue
     ratio = float(temporalSongData[0] / (temporalSongData[0] + temporalSongData[1]))
-    if ratio >= minRatio and ratio <= maxRatio and (criteria <= 4 and temporalSongData[criteria] <= maxCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] <= maxCount):
+    if ratio >= minRatio and ratio <= maxRatio and (criteria <= 4 and temporalSongData[criteria] <= maxCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] <= maxCount) and (temporalSongData[2] >= minDate and temporalSongData[2] <= maxDate):
         csvWriter.writerow([songPermanentDict[songUri][0], songPermanentDict[songUri][1], temporalSongData[0], temporalSongData[1], temporalSongData[0] + temporalSongData[1], int(temporalSongData[4] / 60000), temporalSongData[2], temporalSongData[3], songUri])
         uriArray.append(songUri)
 
