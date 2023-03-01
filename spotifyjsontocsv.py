@@ -5,42 +5,87 @@ import csv
 import os
 import pandas as pd
 
-if len(sys.argv) < 5:
-    print("\nFormat: python spotifyjsontocsv.py <criteria> <mininum number of criteria> <Ratio completed> <path_to_directory> <Optional_Spotify_uri_only file>")
-    print("\nPossible criteria: completion/ended_early/total/listentime")
-    print("\nRatio criteria: Shows songs you've completed more than the minimum percent of times\n Ex: python spotifyjsontocsv.py total 20 .75 C:\\directory_with_spotify_data C:\\output_12345.txt")
-    print("\nThis would give you all the songs that you have played more than 20 times, completed 75% of the time\nAnd sorted by total number of plays in descending order, ignoring uris that are in output_12345.txt ")
+if len(sys.argv) == 1 or sys.argv[1] == "-help":
+    print("\nFormat: python spotifyjsontocsv.py -dir <path to directory with spotify files> -minCount <number> -maxCount <number> -minRatio <0 <= float <= 1> -maxRatio <0 <= float <= 1 -ignoreFile <path>")
+    print("\nPossible criteria: completion/ended_early/total/first_played/last_played/listen_time\n")
+    print("\nRatio criteria: Shows songs you've completed more than the minimum percent of times\n")
+    print("\nIf using first_played/last_played, date range is in the format 'YYYY-MM-DD'\n")
+    sys.exit()
+    
+argCounter = 1
+try:
+    while argCounter + 1 < len(sys.argv):
+        curArg = sys.argv[argCounter]
+        match curArg:
+            case "-dir":
+                path = sys.argv[argCounter + 1]
+            case "-sort":
+                criteriaArg = sys.argv[argCounter + 1]
+            case "-minCount":
+                minCount = int(sys.argv[argCounter + 1])
+            case "-maxCount":
+                maxCount = int(sys.argv[argCounter + 1])
+            case "-minRatio":
+                minRatio = float(sys.argv[argCounter + 1])
+            case "-maxRatio":
+                maxRatio = float(sys.argv[argCounter + 1])
+            case "-ignoreFile":
+                comparisonFile = sys.argv[argCounter + 1]
+            case _:
+                print("Error in parsing command line arguments. Valid arguments: -dir -sort -minCount -maxCount -minRatio -maxRatio -ignoreFile")
+                sys.exit()
+        argCounter += 2
+except:
+    print("Error with one of the count or ratio fields. -minCount/-maxCount/-minRatio/-maxRatio must be a number.")
+    
+
+#We need at least a path specified to search for the input files
+try:
+    path
+    #Grab all the json files in the directory given
+    files = [f for f in os.listdir(path) if f.endswith(".json") and f.startswith("endsong_")]
+except:
+    print("No path specified")
     sys.exit()
 
-#Grab all the json files in the directory given, if none, exit
-criteriaArg = sys.argv[1]
-min = int(sys.argv[2])
-minRatio = float(sys.argv[3])
-path = sys.argv[4]
-comparisonFile = None
-comparisonArr = []
-if len(sys.argv) == 6:
-    comparisonFile = sys.argv[5]
-
-files = [f for f in os.listdir(path) if f.endswith(".json") and f.startswith("endsong_")]
+#If no files found, exit.
 if len(files) == 0:
     print("No files found in" + path)
     sys.exit()
-if min < 0:
-    print("Min out of bounds")
+#Initialize variables, give default values if value not entered.
+try: minCount
+except: minCount = 0
+try: maxCount
+except: maxCount = 9999999999
+try: minRatio
+except: minRatio = float(0)
+try: maxRatio
+except: maxRatio = float(1.0)
+    
+if minCount > maxCount:
+    print("minCount is bigger than maxCount")
     sys.exit()
-if minRatio > 1.0 or minRatio < 0.0:
-    print("minRatio out of bounds")
+if minRatio > maxRatio:
+    print("minRatio is bigger than maxRatio")
     sys.exit()
-if criteriaArg == "completion":
-    criteria = 0
-elif criteriaArg == "ended_early":
-    criteria = 1
-elif criteriaArg == "listenTime":
-    criteria = 4
-elif criteriaArg == "total":
-    criteria = 5
 
+try: criteriaArg
+except: criteriaArg = "total"
+match criteriaArg:
+    case "completion":
+        criteria = 0
+    case "ended_early":
+        criteria = 1
+    case "first_played":
+        criteria = 2
+    case "last_played":
+        criteria = 3
+    case "listen_time":
+        criteria = 4
+    case "total":
+        criteria = 5
+    case _:
+        criteria = 5
 #Setup the output file name
 ts = str(int(time.time()))
 outputfn = "output_" + ts + ".csv"
@@ -60,15 +105,26 @@ songTemporalDict = {}
 #{spotify_uri, [track_name,artist_name]}
 songPermanentDict = {}
 loopBroken = False
+
+#Fix path depending on os
+if os.name == "nt":
+    path += "\\"
+elif os.name == "posix":
+    path += "/"
+
 #Load song information from each file into the dictionaries/counters
 for fileName in files:
-    print("Processing " + fileName + "...")
     if(loopBroken == True):
         print("Error processing file, exiting")
         sys.exit()
-    ###Change the line below iff path given isn't structured like C:\dir_a\dir_b\dir_c Where all the json files are stored in dir_c###
-    cliF = open(path + "\\"+ fileName, "r", encoding="utf-8")
-    ###                                           ###
+    print("Processing " + fileName + "...")
+
+    try:
+        cliF = open(path + fileName, "r", encoding="utf-8")
+    except:
+        print("Error opening file to read entries")
+        sys.exit()
+
     arr = json.load(cliF)
     
     for obj in arr:
@@ -111,18 +167,22 @@ if criteria <= 4:
 else:
     songTemporalDict = sorted(songTemporalDict.items(), key = lambda item: item[1][0] + item[1][1], reverse = True)
 
-if not comparisonFile is None:
+try: 
+    comparisonFile
     f = open(comparisonFile, "r")
     comparisonArr = json.load(f)
     f.close()
-
-#Have to get totals before 
+except:
+    comparisonArr = None
+#Stackoverflow says you can't write specific rows using csv.writer without having to read the whole csv file and writing it out again.
+#So we have to go through the dictionary early to get the aggregate data and write it at the top of the file. 
 for songUri, temporalSongData in songTemporalDict:
-    if criteria <= 4 and temporalSongData[criteria] < min or criteria == 5 and temporalSongData[0] + temporalSongData[1] < min :
+    if criteria <= 4 and temporalSongData[criteria] < minCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] < minCount:
         break
     if not comparisonArr is None and songUri in comparisonArr:
         continue
-    if float(temporalSongData[0] / (temporalSongData[0] + temporalSongData[1])) > minRatio:
+    ratio = float(temporalSongData[0] / (temporalSongData[0] + temporalSongData[1]))
+    if ratio >= minRatio and ratio <= maxRatio and (criteria <= 4 and temporalSongData[criteria] <= maxCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] <= maxCount):
         total_played_count += temporalSongData[0]
         skipped_song_count += temporalSongData[1]
         total_seconds += temporalSongData[4]
@@ -131,28 +191,30 @@ for songUri, temporalSongData in songTemporalDict:
         if temporalSongData[3] > overall_last_played:
             overall_last_played = temporalSongData[3]
             
+#Prep the output file with the headers
 f = open(outputfn, "a", encoding="utf-8", newline="")
-#Use csv.writer to properly write output to file
 csvWriter = csv.writer(f)
 csvWriter.writerow(["Song name", "Artist", "Number of Times Completed", "Number of times ended early", "Total number of plays", "Total Minutes listened", "first_played", "last_played", "Spotify uri"])
-csvWriter.writerow(["All", "Various", total_played_count, skipped_song_count, total_played_count + skipped_song_count, int(total_seconds / 60000), overall_first_played, overall_last_played, "Sorted by " + criteriaArg + " | Min needed: " + str(min) + " | Min ratio: " + str(minRatio) + " | Skipped: " + str(skipped_song_count)])
+csvWriter.writerow(["All", "Various", total_played_count, skipped_song_count, total_played_count + skipped_song_count, int(total_seconds / 60000), overall_first_played, overall_last_played, "Sorted by " + criteriaArg + " | " + str(minCount) +" <= count <=" + str(maxCount) + " | " + str(minRatio) + " <= ratio <= "+ str(maxRatio) + " | Null song entries: " + str(null_song_count)])
+#Array to hold all the spotify uris to output
 uriArray = []
 
-
+#Write all eligible songs to the file, and append spotify links to the array.
 for songUri, temporalSongData in songTemporalDict:
-    if criteria <= 4 and temporalSongData[criteria] < min or criteria == 5 and temporalSongData[0] + temporalSongData[1] < min:
+    if criteria <= 4 and temporalSongData[criteria] < minCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] < minCount:
         break
     if not comparisonArr is None and songUri in comparisonArr:
         continue
-    if float(temporalSongData[0] / (temporalSongData[0] + temporalSongData[1])) > minRatio:
+    ratio = float(temporalSongData[0] / (temporalSongData[0] + temporalSongData[1]))
+    if ratio >= minRatio and ratio <= maxRatio and (criteria <= 4 and temporalSongData[criteria] <= maxCount or criteria == 5 and temporalSongData[0] + temporalSongData[1] <= maxCount):
         csvWriter.writerow([songPermanentDict[songUri][0], songPermanentDict[songUri][1], temporalSongData[0], temporalSongData[1], temporalSongData[0] + temporalSongData[1], int(temporalSongData[4] / 60000), temporalSongData[2], temporalSongData[3], songUri])
         uriArray.append(songUri)
 
 f.close()
 
+#Write array of spotify uris to new file.
 f = open("uri_only_" + ts + ".txt", "a")
 json.dump(uriArray,f)
 f.close()
-
 
 print("Completed! Check Working Directory for output")
