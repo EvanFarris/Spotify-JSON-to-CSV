@@ -145,6 +145,8 @@ for fileName in files:
         else:
             try:
                 objDate = obj["ts"][:10]
+                if objDate < minDate or objDate > maxDate:
+                    continue
                 if obj["spotify_track_uri"] in songTemporalDict:
                     songTemporal = songTemporalDict[obj["spotify_track_uri"]]
                 else:
