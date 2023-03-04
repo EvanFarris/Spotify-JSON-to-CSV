@@ -3,10 +3,9 @@ import sys
 import json
 import csv
 import os
-import pandas as pd
 
 if len(sys.argv) == 1 or sys.argv[1] == "-help":
-    print("\nFormat: python spotifyjsontocsv.py -dir <path to directory with spotify files> -minCount <number> -maxCount <number> -minRatio <0 <= float <= 1> -maxRatio <0 <= float <= 1 -ignoreFile <path> -minDate 2019-01-01 -maxDate 2020-12-31")
+    print("\nFormat: python spotifyjsontocsv.py -dir <path to directory with spotify files> -minCount <number> -maxCount <number> -minRatio <0 <= float <= 1> -maxRatio <0 <= float <= 1 -ignoreFile <path> -minDate YYYY-MM-DD -maxDate YYYY-MM-DD")
     print("\nPossible criteria: completion/ended_early/total/listen_time\n")
     print("\nRatio criteria: Shows songs you've completed more than the minimum percent of times\n")
     print("\nIf using -minDate or -maxDate, date range is in the format 'YYYY-MM-DD'\n")
